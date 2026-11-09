@@ -89,7 +89,9 @@ pgid=$!
 # tail stops when the launcher's group leader exits, and awk then reports
 # whichever lines never came.
 set +e
+# Every line is echoed as it arrives, so a launcher that stalls shows where.
 tail --lines=+1 --follow --pid="$pgid" "$output" 2>/dev/null | awk '
+  { print "  | " $0 > "/dev/stderr"; fflush("/dev/stderr") }
   /error while loading shared libraries|cannot open shared object file|symbol lookup error/ {
     print "loader error: " $0 > "/dev/stderr"; failed = 1; exit
   }
@@ -108,8 +110,6 @@ status=("${PIPESTATUS[@]}")
 set -e
 
 if [ "${status[1]}" -ne 0 ]; then
-  echo "---- launcher output ----" >&2
-  cat "$output" >&2
   die "the launcher did not start up"
 fi
 
