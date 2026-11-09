@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/build
+        with:
+          system: ${{ matrix.system }}
+          # Pushed from trunk only.
+          cachix-auth-token: ${{ github.event_name == 'push' && secrets.CACHIX_AUTH_TOKEN || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # sources.json is machine-written, so the thing worth checking on a pull
+  # request is that a human has not hand-edited it into disagreeing with what
+  # Epic serves. There is no signed index to compare against, so this
+  # downloads the .deb again and compares hashes: a mismatch at the same
+  # version means either a hand edit or Epic replacing a published build in
+  # place, and both want a look.
+  sources-match-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate sources.json and compare
+        run: |
+          cp sources.json sources.json.committed
+          nix develop --command ./scripts/update.sh --force
+
+          # An older pin is fine and expected: upstream moves between the
+          # commit and the check. A pin that differs at the same version is
+          # not.
+          committed_version="$(jq -r .version sources.json.committed)"
+          upstream_version="$(jq -r .version sources.json)"
+
+          if [ "$committed_version" != "$upstream_version" ]; then
+            echo "Pinned at $committed_version, upstream is now $upstream_version." \
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          diff -u sources.json.committed sources.json || {
+            echo "sources.json does not match what Epic serves at $committed_version" >&2
+            exit 1
+          }
