@@ -95,7 +95,8 @@ Rewrites sources.json from Epic's download service.
             is, without downloading or writing anything.
   --force   Rewrite sources.json even when the pinned version is already the
             newest one, so that its contents can be compared against a fresh
-            download.
+            download, or when Epic's current version is older than the
+            pinned one.
 USAGE
         exit 0 ;;
       *) die "unknown argument: $1" ;;
@@ -132,6 +133,20 @@ USAGE
   if [ "$current_version" = "$latest_version" ] && [ "$force" = false ]; then
     log "already up to date"
     exit 0
+  fi
+
+  # stable-target.json is a pointer Epic can move either way (it carries a
+  # mode and an emergencyOverride), so a different version is not always a
+  # newer one. A rollback is for a human to look at, not to land and
+  # release; --force takes it on purpose. Ordered on the numbers before
+  # "+g<commit>", which the format check above has already made plain.
+  if [ "$current_version" != "none" ] && [ "$force" = false ]; then
+    local current_number="${current_version%%+*}" latest_number="${latest_version%%+*}" newest
+    [ "$current_number" != "$latest_number" ] ||
+      die "stable-target.json names a different build of $current_number: $current_version -> $latest_version; not pinning it (use --force to)"
+    newest="$(printf '%s\n' "$current_number" "$latest_number" | sort -V | tail -n1)"
+    [ "$newest" = "$latest_number" ] ||
+      die "stable-target.json went back from $current_version to $latest_version; not pinning a rollback (use --force to)"
   fi
 
   if [ "$check_only" = true ]; then

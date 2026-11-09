@@ -3,9 +3,9 @@ name: Upstream
 # Epic releases the launcher whenever it likes, so this polls hourly rather
 # than waits for a webhook it will never get. It is the repository's
 # release: a new upstream version is the only thing that tags, except that
-# a version already on trunk without its tag gets one on the next run. That
-# covers the first version, which came in with the repository rather than
-# through this job.
+# a version already on trunk without its release gets one on the next run.
+# That covers the first version, which came in with the repository rather
+# than through this job.
 #
 # The version only reaches trunk after it has actually built and run. That
 # is why this pushes straight to trunk instead of opening a pull request: a
@@ -72,16 +72,25 @@ jobs:
 
       # A release is the tag and the GitHub release that go with it. The
       # version on trunk can be without them: the first one, or one whose
-      # publish stopped after the push. publish then tags that version.
-      - name: Look for the version's tag
+      # publish stopped after the push, before or after the tag. This looks
+      # for the GitHub release, which comes last, so a version with its tag
+      # but no release still gets one; publish then tags it if it needs to.
+      # Any answer from gh other than "release not found" fails the job
+      # rather than releasing twice.
+      - name: Look for the version's release
         id: tag
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.update.outputs.version }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+          if gh release view "v$VERSION" --json tagName >/dev/null 2>gh-error.txt; then
             echo "tagged=true" >>"$GITHUB_OUTPUT"
-          else
+          elif grep -qx "release not found" gh-error.txt; then
             echo "tagged=false" >>"$GITHUB_OUTPUT"
+          else
+            cat gh-error.txt >&2
+            exit 1
           fi
 
       - name: Upload the candidate sources.json
@@ -161,8 +170,14 @@ jobs:
           # A tag per release, so a consumer can pin one exactly. It goes on
           # the commit that brought the version in: the one just pushed, or,
           # for a version that landed untagged, the last to change sources.json.
-          git tag -a "v$VERSION" -m "epic-games-launcher $VERSION" "$(git log -1 --format=%H -- sources.json)"
-          git push origin "v$VERSION"
+          # A version whose earlier publish pushed the tag and then stopped
+          # keeps that tag, and only gets its release here.
+          if git rev-parse --quiet --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "v$VERSION is already tagged; releasing it"
+          else
+            git tag -a "v$VERSION" -m "epic-games-launcher $VERSION" "$(git log -1 --format=%H -- sources.json)"
+            git push origin "v$VERSION"
+          fi
 
           # printf rather than a heredoc, whose body would carry this block's
           # YAML indentation into the release notes.

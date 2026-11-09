@@ -16,8 +16,13 @@
 # without a game to run. To that it adds what GE-Proton's own ELF files name
 # and do not bundle, checked with readelf against GE-Proton10-34: chiefly
 # GLib, which winegstreamer and the GStreamer GE-Proton ships both link, and
-# without which games' videos and much of their audio fail. The flake's
-# fhs-libraries check keeps GLib in both trees.
+# without which games' videos and much of their audio fail; and, from
+# proton-libraries.nix, the libvpx.so.6 that GE-Proton's own FFmpeg
+# (libavcodec.so.58) links, without which neither Wine's FFmpeg media
+# backend (winedmo) nor gst-libav loads, and the libtheora 1.1 its Theora
+# plugin links. The flake's fhs-libraries check keeps all of these in both
+# trees. What GE-Proton names and this still leaves out is in the README,
+# under Things to know.
 {
   lib,
   buildFHSEnv,
@@ -166,7 +171,10 @@ buildFHSEnv {
       gstreamer
       gst-plugins-base
       gst-plugins-good
-    ]);
+    ])
+    # Older sonames GE-Proton's FFmpeg and GStreamer plugins link, which
+    # nixpkgs' current packages no longer provide.
+    ++ import ./proton-libraries.nix pkgs;
 
   runScript = lib.getExe epic-games-launcher-unwrapped;
 

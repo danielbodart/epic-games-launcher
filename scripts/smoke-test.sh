@@ -59,6 +59,10 @@ trap cleanup EXIT
 home="$workdir/home"
 output="$workdir/launcher.log"
 mkdir -p "$home"
+# tail below opens the log before the launcher's redirect may have created
+# it, and without --retry would give up on a missing file. The redirect
+# truncates this same file, and tail follows it from the first line.
+: >"$output"
 
 # A desktop session's WAYLAND_DISPLAY would put the window on the real
 # screen instead of Xvfb's, and its D-Bus and keyring would hand the

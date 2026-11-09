@@ -125,15 +125,17 @@ was written for, before it writes anything down:
 | --- | --- |
 | `Builds/EGLv2/stable-target.json` | The version the installed launcher itself polls for |
 | The download link on Epic's site | Must redirect to that same version, or the update stops |
+| The version pinned now | The new one must not be older: a rollback stops the update for a human (`--force` takes it on purpose) |
 | `Builds/EGLv2/<version>/Linux/EpicGamesLauncher-x86_64.deb` | Downloaded over TLS; its control file must name package `epic-games-launcher` at that version |
 | The `.deb`'s `Depends` and file list | Must be the ones `package.nix` provides for; no maintainer scripts may appear |
 | The bytes Nix downloads later | The hash in `sources.json`, checked by `fetchurl` |
 
 Once pinned, nothing can change underneath you: every later download of
 that URL, by you or by CI, has to match the recorded hash. And continuous
-integration downloads it again on every pull request, so a hand-edited
-`sources.json`, or Epic replacing a published build in place, fails loudly
-rather than slipping through.
+integration downloads the pinned URL again on every push and pull request
+and checks it against the recorded hash, size and version, whatever Epic's
+current release is, so a hand-edited `sources.json`, or Epic replacing a
+published build in place, fails loudly rather than slipping through.
 
 ## Channels
 
@@ -161,13 +163,15 @@ version it regenerates `sources.json`, then builds the package, runs
 `nix flake check`, and starts the launcher (see
 [Development](#development)) on an `x86_64-linux` runner. Only if that
 succeeds does the commit reach `trunk`, followed by a `v<version>` tag and a
-GitHub release. If the version on `trunk` has no tag, because it is the one
-the repository started with or a publish stopped after the push, the same
-job tags the commit that brought it in and releases it.
+GitHub release. If the version on `trunk` has no GitHub release, because it is the
+one the repository started with or a publish stopped after the push, the
+same job tags the commit that brought it in, if it is not tagged already,
+and releases it.
 
 If the new `.deb` depends on something new, drops a file the package uses,
-grows a maintainer script, or Epic's two answers about the current version
-disagree, the job fails instead, and the pin stays where it was until
+grows a maintainer script, Epic's two answers about the current version
+disagree, or Epic points them back at a version older than the pinned one,
+the job fails instead, and the pin stays where it was until
 someone has looked.
 
 This pushes to `trunk` rather than opening a pull request on purpose. A pull
@@ -204,7 +208,12 @@ Two packages, as the prior flakes worked out:
 - **`epic-games-launcher`**, the default: that, run inside a `buildFHSEnv`
   with 64- and 32-bit copies of the libraries Wine and GE-Proton expect
   under `/usr/lib`, the way nixpkgs' Steam is. The launcher itself does not
-  need it; the games it starts do.
+  need it; the games it starts do. Two of those are older than nixpkgs now
+  carries, built here from upstream's releases: libvpx 1.10
+  (`libvpx.so.6`), which GE-Proton's own FFmpeg links, and libtheora 1.1
+  (`libtheoradec.so.1`), for its Theora plugin. Without libvpx neither
+  Wine's FFmpeg media backend (`winedmo`) nor GStreamer's `gst-libav`
+  loads, and with them go the H.264 and other decoders games' videos use.
 
 The `.deb` has no maintainer scripts, so nothing of Epic's is skipped by
 unpacking it rather than installing it.
@@ -228,6 +237,11 @@ unpacking it rather than installing it.
   the store, but cannot start a game. Neither GE-Proton nor any game is
   pinned or tested here, and nor is signing in: CI has no Epic account, so
   the smoke test gets as far as the signed-out first-run screen.
+  GE-Proton10-34 also names a few libraries the FHS environment does not
+  have, all for single GStreamer plugins: `libFLAC.so.8` (FLAC audio),
+  `libwebp.so.6` (WebP images), and OpenSSL 1.1 (the `aes` and `dtls`
+  plugins, which games do not use). nixpkgs has moved each to a new
+  soname, and OpenSSL 1.1 is end of life, so those plugins do not load.
 - **Fortnite is Epic's call.** Whether Fortnite can be installed on Linux is
   decided by Epic's servers (the launcher has a `fortnite_gate`), not by
   anything this package can change.
@@ -269,7 +283,8 @@ nix develop                    # curl, dbus, dpkg, jq, nixfmt, shellcheck, xvfb-
 nix flake check                # builds both packages, checks the pin, the dlopen paths and the module
 ./scripts/update.sh            # regenerate sources.json
 ./scripts/update.sh --check    # exit non-zero if a newer version exists
-./scripts/update.sh --force    # re-download and rewrite even when already current
+./scripts/update.sh --force    # re-download and rewrite even when already current, or take a rollback
+./scripts/check-pin.sh         # re-download the pinned .deb and check its hash, size and version
 nix build && ./scripts/smoke-test.sh result/bin/epic-games-launcher
 ```
 

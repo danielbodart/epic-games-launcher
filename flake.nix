@@ -146,16 +146,22 @@
                 } >$out
               '';
 
-          # GE-Proton brings its own Wine and GStreamer but not the GLib they
-          # link, expecting the host to have it in both its 64- and 32-bit
-          # library directories. This looks in the FHS tree the games run in,
-          # so dropping GLib from nix/fhs.nix fails here rather than silently
-          # in a game's cutscene.
+          # GE-Proton brings its own Wine, GStreamer and FFmpeg but not the
+          # GLib, libvpx.so.6 and libtheora 1.1 they link, expecting the host
+          # to have them in both its 64- and 32-bit library directories. This
+          # looks in the FHS tree the games run in, at the ELF class too, so
+          # dropping one from nix/fhs.nix, or nixpkgs moving a soname on,
+          # fails here rather than silently in a game's cutscene.
           fhs-libraries = pkgs.runCommand "epic-games-launcher-fhs-libraries" { } ''
             root=${epic-games-launcher.fhsenv}
-            for lib in libglib-2.0.so.0 libgobject-2.0.so.0 libgmodule-2.0.so.0 libgio-2.0.so.0; do
-              for dir in usr/lib64 usr/lib32; do
+            for lib in libglib-2.0.so.0 libgobject-2.0.so.0 libgmodule-2.0.so.0 libgio-2.0.so.0 \
+              libvpx.so.6 libtheoradec.so.1 libtheoraenc.so.1; do
+              for entry in usr/lib64:2 usr/lib32:1; do
+                dir="''${entry%:*}"
                 [ -e "$root/$dir/$lib" ] || { echo "$dir/$lib is missing from the FHS environment" >&2; exit 1; }
+                # EI_CLASS, the fifth byte of the ELF header: 1 is 32-bit, 2 is 64-bit.
+                class="$(od -An -tu1 -j4 -N1 "$root/$dir/$lib" | tr -d ' ')"
+                [ "$class" = "''${entry#*:}" ] || { echo "$dir/$lib is the wrong ELF class ($class)" >&2; exit 1; }
                 echo "$dir/$lib" >>$out
               done
             done
@@ -238,7 +244,7 @@
           shellcheck =
             pkgs.runCommand "epic-games-launcher-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; }
               ''
-                shellcheck ${./scripts/update.sh} ${./scripts/smoke-test.sh}
+                shellcheck ${./scripts/update.sh} ${./scripts/smoke-test.sh} ${./scripts/check-pin.sh}
                 touch $out
               '';
 

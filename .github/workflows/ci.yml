@@ -39,9 +39,11 @@ jobs:
   # sources.json is machine-written, so the thing worth checking on a pull
   # request is that a human has not hand-edited it into disagreeing with what
   # Epic serves. There is no signed index to compare against, so this
-  # downloads the .deb again and compares hashes: a mismatch at the same
-  # version means either a hand edit or Epic replacing a published build in
-  # place, and both want a look.
+  # downloads the pinned .deb again, from the pinned URL, and checks it
+  # against the pinned hash, size and version: a mismatch means either a hand
+  # edit or Epic replacing a published build in place, and both want a look.
+  # It checks the pin, not Epic's current release, so it says the same thing
+  # whatever state upstream is in; following upstream is upstream.yml's job.
   sources-match-upstream:
     runs-on: ubuntu-latest
     steps:
@@ -53,24 +55,5 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Regenerate sources.json and compare
-        run: |
-          cp sources.json sources.json.committed
-          nix develop --command ./scripts/update.sh --force
-
-          # An older pin is fine and expected: upstream moves between the
-          # commit and the check. A pin that differs at the same version is
-          # not.
-          committed_version="$(jq -r .version sources.json.committed)"
-          upstream_version="$(jq -r .version sources.json)"
-
-          if [ "$committed_version" != "$upstream_version" ]; then
-            echo "Pinned at $committed_version, upstream is now $upstream_version." \
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          diff -u sources.json.committed sources.json || {
-            echo "sources.json does not match what Epic serves at $committed_version" >&2
-            exit 1
-          }
+      - name: Download the pinned .deb and compare
+        run: nix develop --command ./scripts/check-pin.sh
