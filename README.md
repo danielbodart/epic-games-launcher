@@ -68,7 +68,7 @@ What this one adds is the same treatment as its sibling flakes,
 Besides installing the package, the module turns on 32-bit graphics drivers
 (`hardware.graphics.enable32Bit`), which Proton needs as it does under Steam,
 and GNOME Keyring as the Secret Service provider the launcher keeps its
-sign-in in. Both are `mkDefault`, so a host that already has its own
+sign-in token in. Both are `mkDefault`, so a host that already has its own
 arrangement keeps it.
 
 ### Home Manager, or any other profile
@@ -77,8 +77,10 @@ arrangement keeps it.
 home.packages = [ inputs.epic-games-launcher.packages.${pkgs.system}.default ];
 ```
 
-Outside the module, make sure 32-bit graphics drivers and a Secret Service
-provider (GNOME Keyring, KeePassXC, KWallet) are there yourself.
+Outside the module, make sure 32-bit graphics drivers are there yourself,
+and a Secret Service provider (GNOME Keyring, KeePassXC, KWallet), without
+which the launcher keeps its sign-in token in a plaintext file (see
+[Things to know](#things-to-know)).
 
 The package is unfree, so `nixpkgs.config.allowUnfree` has to permit it.
 This flake's own outputs set that for themselves; taking the overlay instead
@@ -198,21 +200,28 @@ unpacking it rather than installing it.
   dependencies or layout rather than ship something half-working, so a
   release can take a manual look before it lands here.
 - **Games run through GE-Proton, downloaded at runtime.** On first use the
-  launcher fetches a pinned GE-Proton (GE-Proton10-34 in 0.113.0, checked
-  against a SHA-512 inside the binary; `EGL_PROTON_PIN` overrides it) into
-  `~/.local/share/com.epicgames.eglv2/compat`. Every game, as far as this
+  launcher fetches whichever GE-Proton Epic's CDN currently pins, into
+  `~/.local/share/com.epicgames.eglv2/compat`. Only when the CDN names none,
+  or names one older than its own or from a source it does not allow, does
+  it fall back to the GE-Proton built into the binary (GE-Proton10-34 in
+  0.113.0, checked against a SHA-512); `EGL_PROTON_PIN` overrides both. So
+  Epic can move the Proton version without a launcher release. Every game, as far as this
   release shows, goes through it; there is no native Linux launch path yet.
   That GE-Proton is built for a generic Linux, which is why the default
-  package is the FHS environment. The unwrapped launcher signs in and
-  browses fine, but cannot start a game. Neither GE-Proton nor any game is
-  pinned or tested here: CI has no Epic account to sign in with.
+  package is the FHS environment. The unwrapped launcher starts and shows
+  the store, but cannot start a game. Neither GE-Proton nor any game is
+  pinned or tested here, and nor is signing in: CI has no Epic account, so
+  the smoke test gets as far as the signed-out first-run screen.
 - **Fortnite is Epic's call.** Whether Fortnite can be installed on Linux is
   decided by Epic's servers (the launcher has a `fortnite_gate`), not by
   anything this package can change.
-- **It needs a Secret Service keyring.** The launcher keeps its session in
-  the Secret Service over D-Bus. Without one it logs that the keyring is
-  locked and asks you to sign in every time it starts. The NixOS module
-  enables GNOME Keyring; elsewhere, any provider will do.
+- **It wants a Secret Service keyring.** The launcher keeps its refresh
+  token in the Secret Service over D-Bus. When none answers, or the keyring
+  stays locked, it writes the token in plaintext to `auth.json` (mode 0600)
+  under its data directory, and moves it into the keyring the next time one
+  answers. So a keyring is not strictly required, but without one your Epic
+  sign-in sits on disk unencrypted. The NixOS module enables GNOME Keyring;
+  elsewhere, any provider will do.
 - **Self-update is switched off.** The launcher has its own updater, which
   downloads each release in the background and installs it over itself. It
   cannot write to the store, so it would fail on every release. The wrapper
@@ -220,6 +229,19 @@ unpacking it rather than installing it.
   logs `get_self_update_disabled called disabled=true` and skips
   downloading and applying updates. New versions come through this flake
   instead. CI checks for that log line on every build.
+- **Leave "Start on boot" off.** The launcher's own setting writes
+  `~/.config/autostart/epic-games-launcher.desktop` pointing at the bare
+  binary's versioned store path, and rewrites it that way on every start,
+  so editing it does not last. Started from there it runs outside the FHS
+  environment, so games cannot start, without the wrapper's environment, so
+  its self-updater is live and TLS and media plugins are missing, and from a
+  path that disappears after the next update and garbage collection. To
+  start it at login, leave the setting off and add your own autostart entry,
+  under another file name, running `epic-games-launcher --autostart`. The
+  wrapper could point the launcher's entry at itself by claiming to be an
+  AppImage (`APPIMAGE`), but the launcher has its own AppImage handling,
+  renaming and relaunching the file and pinning GIO modules to it, and that
+  is not something to set off by pretending.
 - **x86\_64 only.** Epic publishes no other architecture.
 
 ## Development
@@ -244,7 +266,7 @@ launcher, not on a clock.
 ## Binary cache
 
 CI pushes both packages to `https://danielbodart.cachix.org`, so you can
-substitute the build instead of downloading an 85 MB `.deb`, patching it,
+substitute the build instead of downloading an 88 MB `.deb`, patching it,
 and assembling the FHS environment yourself.
 
 The flake offers the cache through `nixConfig`, which Nix applies only if

@@ -20,8 +20,8 @@ in
       description = ''
         The epic-games-launcher package to install. The default is the
         launcher in the FHS environment its games need;
-        `epic-games-launcher-unwrapped` is the launcher alone, which signs in
-        and browses the store but cannot start a game.
+        `epic-games-launcher-unwrapped` is the launcher alone, which starts
+        and shows the store but cannot start a game.
       '';
     };
   };
@@ -37,8 +37,9 @@ in
       enable32Bit = lib.mkDefault true;
     };
 
-    # The launcher keeps its Epic session in a Secret Service keyring, which
-    # it talks to over D-Bus. Any provider will do; this is the usual one.
+    # The launcher keeps its Epic refresh token in a Secret Service keyring,
+    # which it talks to over D-Bus, and falls back to a plaintext auth.json
+    # when none answers. Any provider will do; this is the usual one.
     services.gnome.gnome-keyring.enable = lib.mkDefault true;
   };
 }
