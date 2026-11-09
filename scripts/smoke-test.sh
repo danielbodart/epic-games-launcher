@@ -64,6 +64,12 @@ mkdir -p "$home"
 # truncates this same file, and tail follows it from the first line.
 : >"$output"
 
+# dbus-run-session defaults to /etc/dbus-1/session.conf, which NixOS has and
+# a CI runner need not. Use the session config shipped beside the binary.
+dbus_bin="$(readlink -f "$(command -v dbus-run-session)")"
+dbus_config="$(dirname "$dbus_bin")/../share/dbus-1/session.conf"
+[ -f "$dbus_config" ] || die "no session.conf next to $dbus_bin"
+
 # A desktop session's WAYLAND_DISPLAY would put the window on the real
 # screen instead of Xvfb's, and its D-Bus and keyring would hand the
 # launcher a real account's secrets. Neither belongs in a smoke test.
@@ -77,7 +83,7 @@ setsid env \
   XDG_STATE_HOME="$home/.local/state" \
   GDK_BACKEND=x11 \
   xvfb-run --auto-servernum --server-args="-screen 0 1600x900x24" \
-  dbus-run-session -- "$launcher" >"$output" 2>&1 &
+  dbus-run-session --config-file="$dbus_config" -- "$launcher" >"$output" 2>&1 &
 pgid=$!
 
 # tail stops when the launcher's group leader exits, and awk then reports
