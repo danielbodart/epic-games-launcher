@@ -32,13 +32,16 @@ What this one adds is the same treatment as its sibling flakes,
 - **Pins versioned URLs, never the moving one.** Epic's download link always
   serves the newest build. `sources.json` records the build's own URL, so
   every pin stays buildable after Epic moves on.
-- **Cross-checks every update** against two independent sources before
-  writing anything. See [Provenance](#provenance).
+- **Checks the version before pinning it.** Epic's launcher manifest and
+  its download link must name the same release, and the `.deb` must be that
+  release, with the dependencies and layout this package expects. There is
+  no signature to check: see [Provenance](#provenance).
 - **Updates itself hourly**, and only lands a version that has been built
   and actually started first.
 - **Tags every release**, so
   `github:danielbodart/epic-games-launcher/v0.113.0+g2164614` pins one
-  exactly.
+  exactly. A version that reached `trunk` without a tag, such as the first,
+  gets its tag and release on the next hourly run.
 - **Keeps the launcher's own updater off**, which cannot work from a
   read-only store and would otherwise fail on every release. See
   [Things to know](#things-to-know).
@@ -66,10 +69,21 @@ What this one adds is the same treatment as its sibling flakes,
 ```
 
 Besides installing the package, the module turns on 32-bit graphics drivers
-(`hardware.graphics.enable32Bit`), which Proton needs as it does under Steam,
-and GNOME Keyring as the Secret Service provider the launcher keeps its
-sign-in token in. Both are `mkDefault`, so a host that already has its own
-arrangement keeps it.
+(`hardware.graphics.enable32Bit`), which Proton needs as it does under
+Steam, at `mkDefault`, so a host that already has its own arrangement keeps
+it.
+
+It also turns on GNOME Keyring as the Secret Service provider the launcher
+keeps its sign-in token in, but only weakly, so anything else on the host
+with a say about GNOME Keyring wins, and without its SSH agent: on its own,
+GNOME Keyring brings GCR's SSH agent, which would take over
+`SSH_AUTH_SOCK` and cannot coexist with `programs.ssh.startAgent`. When the
+module is the only thing asking for GNOME Keyring, it keeps
+`services.gnome.gcr-ssh-agent` off; a GNOME or other desktop that turns on
+the keyring keeps its own SSH agent setting. On Plasma 6, whose KWallet
+already answers as the Secret Service, the module leaves GNOME Keyring off.
+Set `programs.epic-games-launcher.gnomeKeyring.enable = false` if another
+provider, such as KeePassXC, does the job.
 
 ### Home Manager, or any other profile
 
@@ -137,8 +151,8 @@ rather than slipping through.
 
 Updated hourly for a new upstream release (`upstream.yml`, which tags and
 releases it) and weekly, Sunday 21:23 UTC, for the flake's inputs
-(`update.yml`, the Weekly update). A release is cut only when Epic's version
-changed; the weekly update never releases.
+(`update.yml`, the Weekly update). A release is cut only for an Epic
+version that has none yet; the weekly update never releases.
 
 ## How updates work
 
@@ -147,7 +161,9 @@ version it regenerates `sources.json`, then builds the package, runs
 `nix flake check`, and starts the launcher (see
 [Development](#development)) on an `x86_64-linux` runner. Only if that
 succeeds does the commit reach `trunk`, followed by a `v<version>` tag and a
-GitHub release.
+GitHub release. If the version on `trunk` has no tag, because it is the one
+the repository started with or a publish stopped after the push, the same
+job tags the commit that brought it in and releases it.
 
 If the new `.deb` depends on something new, drops a file the package uses,
 grows a maintainer script, or Epic's two answers about the current version
@@ -220,8 +236,10 @@ unpacking it rather than installing it.
   stays locked, it writes the token in plaintext to `auth.json` (mode 0600)
   under its data directory, and moves it into the keyring the next time one
   answers. So a keyring is not strictly required, but without one your Epic
-  sign-in sits on disk unencrypted. The NixOS module enables GNOME Keyring;
-  elsewhere, any provider will do.
+  sign-in sits on disk unencrypted. The NixOS module enables GNOME Keyring,
+  except on Plasma 6, where KWallet is the provider, and never with its GCR
+  SSH agent unless something else on the host asks for it (see
+  [NixOS](#nixos)); elsewhere, any provider will do.
 - **Self-update is switched off.** The launcher has its own updater, which
   downloads each release in the background and installs it over itself. It
   cannot write to the store, so it would fail on every release. The wrapper

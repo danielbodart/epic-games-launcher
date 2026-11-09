@@ -9,10 +9,15 @@
 # namespace with an FHS tree built out of store paths, 64- and 32-bit both.
 #
 # The shape follows Hy4ri/epic-games-launcher-flake, which got games running
-# this way first. The library list is its, less the scanner, camera, Samba,
-# LDAP, packet capture and OpenCL support Wine can use but games rarely do,
-# and less its SDL rpath rewriting, which works around a GE-Proton library
-# clash this package has not been able to reproduce without a game to run.
+# this way first. The library list starts from its, less the scanner,
+# camera, Samba, LDAP, packet capture and OpenCL support Wine can use but
+# games rarely do, and less its SDL rpath rewriting, which works around a
+# GE-Proton library clash this package has not been able to reproduce
+# without a game to run. To that it adds what GE-Proton's own ELF files name
+# and do not bundle, checked with readelf against GE-Proton10-34: chiefly
+# GLib, which winegstreamer and the GStreamer GE-Proton ships both link, and
+# without which games' videos and much of their audio fail. The flake's
+# fhs-libraries check keeps GLib in both trees.
 {
   lib,
   buildFHSEnv,
@@ -122,6 +127,20 @@ buildFHSEnv {
       vulkan-loader
       wayland
       zlib
+
+      # Not bundled by GE-Proton, but linked by its winegstreamer and the
+      # GStreamer and plugins it ships: Wine's media path, behind Media
+      # Foundation and DirectShow, so games' videos, cutscenes and much of
+      # their audio.
+      blas
+      cairo
+      glib
+      gtk3
+      lapack
+      libgudev
+      libvdpau
+      nettle
+      pango
 
       # X11, which Wine still draws through by default.
       libice

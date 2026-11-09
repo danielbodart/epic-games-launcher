@@ -146,6 +146,21 @@
                 } >$out
               '';
 
+          # GE-Proton brings its own Wine and GStreamer but not the GLib they
+          # link, expecting the host to have it in both its 64- and 32-bit
+          # library directories. This looks in the FHS tree the games run in,
+          # so dropping GLib from nix/fhs.nix fails here rather than silently
+          # in a game's cutscene.
+          fhs-libraries = pkgs.runCommand "epic-games-launcher-fhs-libraries" { } ''
+            root=${epic-games-launcher.fhsenv}
+            for lib in libglib-2.0.so.0 libgobject-2.0.so.0 libgmodule-2.0.so.0 libgio-2.0.so.0; do
+              for dir in usr/lib64 usr/lib32; do
+                [ -e "$root/$dir/$lib" ] || { echo "$dir/$lib is missing from the FHS environment" >&2; exit 1; }
+                echo "$dir/$lib" >>$out
+              done
+            done
+          '';
+
           # The launcher's own updater cannot write to the store and must stay
           # off. If the wrapper loses the switch, this fails.
           self-update-disabled = pkgs.runCommand "epic-games-launcher-self-update-disabled" { } ''
@@ -158,32 +173,67 @@
 
           # Evaluation only, not a build: enough to catch an option this module
           # sets that nixpkgs has since renamed or removed, without standing up
-          # a whole system.
+          # a whole system. It evaluates the module on the hosts it has to
+          # leave alone as well as a bare one: one running OpenSSH's agent,
+          # which GNOME Keyring's GCR agent cannot sit beside, one on Plasma 6,
+          # whose KWallet is already the Secret Service, and one on GNOME,
+          # whose own keyring and SSH agent the module must not touch.
           #
           # unsafeDiscardStringContext is what keeps it that way. Interpolating
           # a drvPath with its context intact makes the toplevel an input of
           # this derivation, and `nix flake check` would go and build a NixOS
           # system.
-          nixos-module = pkgs.runCommand "epic-games-launcher-nixos-module" { } ''
-            echo ${
-              builtins.unsafeDiscardStringContext
-                (nixpkgs.lib.nixosSystem {
-                  modules = [
-                    self.nixosModules.default
-                    {
-                      nixpkgs.hostPlatform = system;
-                      boot.loader.grub.devices = [ "/dev/null" ];
-                      fileSystems."/" = {
-                        device = "/dev/null";
-                        fsType = "ext4";
-                      };
-                      system.stateVersion = "26.05";
-                      programs.epic-games-launcher.enable = true;
-                    }
-                  ];
-                }).config.system.build.toplevel.drvPath
-            } >$out
-          '';
+          nixos-module =
+            let
+              host =
+                name: extra: expected:
+                let
+                  config =
+                    (nixpkgs.lib.nixosSystem {
+                      modules = [
+                        self.nixosModules.default
+                        {
+                          nixpkgs.hostPlatform = system;
+                          boot.loader.grub.devices = [ "/dev/null" ];
+                          fileSystems."/" = {
+                            device = "/dev/null";
+                            fsType = "ext4";
+                          };
+                          system.stateVersion = "26.05";
+                          programs.epic-games-launcher.enable = true;
+                        }
+                        extra
+                      ];
+                    }).config;
+                  actual = {
+                    gnomeKeyring = config.services.gnome.gnome-keyring.enable;
+                    gcrSshAgent = config.services.gnome.gcr-ssh-agent.enable;
+                  };
+                in
+                assert nixpkgs.lib.assertMsg (actual == expected)
+                  "on the ${name} host the module gives ${builtins.toJSON actual}, expected ${builtins.toJSON expected}";
+                "${name} ${builtins.unsafeDiscardStringContext config.system.build.toplevel.drvPath}";
+            in
+            pkgs.runCommand "epic-games-launcher-nixos-module" { } ''
+              cat >$out <<'EOF'
+              ${host "bare" { } {
+                gnomeKeyring = true;
+                gcrSshAgent = false;
+              }}
+              ${host "ssh-agent" { programs.ssh.startAgent = true; } {
+                gnomeKeyring = true;
+                gcrSshAgent = false;
+              }}
+              ${host "plasma6" { services.desktopManager.plasma6.enable = true; } {
+                gnomeKeyring = false;
+                gcrSshAgent = false;
+              }}
+              ${host "gnome" { services.desktopManager.gnome.enable = true; } {
+                gnomeKeyring = true;
+                gcrSshAgent = true;
+              }}
+              EOF
+            '';
 
           shellcheck =
             pkgs.runCommand "epic-games-launcher-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; }

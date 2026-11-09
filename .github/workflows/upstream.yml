@@ -2,7 +2,10 @@ name: Upstream
 
 # Epic releases the launcher whenever it likes, so this polls hourly rather
 # than waits for a webhook it will never get. It is the repository's
-# release: a new upstream version is the only thing that tags.
+# release: a new upstream version is the only thing that tags, except that
+# a version already on trunk without its tag gets one on the next run. That
+# covers the first version, which came in with the repository rather than
+# through this job.
 #
 # The version only reaches trunk after it has actually built and run. That
 # is why this pushes straight to trunk instead of opening a pull request: a
@@ -34,6 +37,7 @@ jobs:
       updated: ${{ steps.update.outputs.updated }}
       version: ${{ steps.update.outputs.version }}
       previous: ${{ steps.update.outputs.previous }}
+      tagged: ${{ steps.tag.outputs.tagged }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -64,6 +68,20 @@ jobs:
           else
             echo "updated=true" >>"$GITHUB_OUTPUT"
             echo "\`$previous\` -> \`$version\`" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A release is the tag and the GitHub release that go with it. The
+      # version on trunk can be without them: the first one, or one whose
+      # publish stopped after the push. publish then tags that version.
+      - name: Look for the version's tag
+        id: tag
+        env:
+          VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "tagged=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >>"$GITHUB_OUTPUT"
           fi
 
       - name: Upload the candidate sources.json
@@ -99,6 +117,12 @@ jobs:
 
   publish:
     needs: [check, verify]
+    # verify is skipped when there is no new version, which would skip this
+    # too, untagged version or not, without saying otherwise here. A failure
+    # anywhere before still stops it.
+    if: >-
+      !cancelled() && !failure() &&
+      (needs.check.outputs.updated == 'true' || needs.check.outputs.tagged == 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,19 +130,21 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.check.outputs.updated == 'true'
         with:
           name: sources
 
-      - name: Commit, tag and release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.check.outputs.version }}
-          PREVIOUS: ${{ needs.check.outputs.previous }}
-          REPOSITORY: ${{ github.repository }}
+      - name: Identify as the Actions bot
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Commit
+        if: needs.check.outputs.updated == 'true'
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
+        run: |
           git add sources.json
           git commit \
             -m "epic-games-launcher: $PREVIOUS -> $VERSION" \
@@ -126,8 +152,16 @@ jobs:
           git pull --rebase origin trunk
           git push origin HEAD:trunk
 
-          # A tag per release, so a consumer can pin one exactly.
-          git tag -a "v$VERSION" -m "epic-games-launcher $VERSION"
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # A tag per release, so a consumer can pin one exactly. It goes on
+          # the commit that brought the version in: the one just pushed, or,
+          # for a version that landed untagged, the last to change sources.json.
+          git tag -a "v$VERSION" -m "epic-games-launcher $VERSION" "$(git log -1 --format=%H -- sources.json)"
           git push origin "v$VERSION"
 
           # printf rather than a heredoc, whose body would carry this block's
