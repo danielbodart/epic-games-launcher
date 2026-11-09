@@ -72,6 +72,18 @@ runs:
     # the version the launcher reports against sources.json. See the script
     # for the detail. It waits on the launcher, not on a clock: a launcher
     # that hangs is ended by the job's own time limit.
+    # WebKit's web process needs an EGL driver, which Nix-built programs find
+    # under /run/opengl-driver: NixOS puts Mesa there with hardware.graphics,
+    # which the module turns on. The runner has none, and the web process
+    # then aborts on "Could not create default EGL display" and is restarted
+    # forever, so give it what a NixOS host would, from this flake's nixpkgs.
+    - name: Provide /run/opengl-driver as NixOS does
+      shell: bash
+      run: |
+        mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa)"
+        sudo ln -sfn "$mesa" /run/opengl-driver
+        ls /run/opengl-driver/share/glvnd/egl_vendor.d
+
     - name: Run the packaged launcher
       shell: bash
       run: |

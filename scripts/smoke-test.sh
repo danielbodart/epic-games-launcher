@@ -95,7 +95,12 @@ tail --lines=+1 --follow --pid="$pgid" "$output" 2>/dev/null | awk '
   /error while loading shared libraries|cannot open shared object file|symbol lookup error/ {
     print "loader error: " $0 > "/dev/stderr"; failed = 1; exit
   }
-  /category=EosClient\.Initialized/                     { eos = 1 }
+  # The launcher restarts a crashed web process for as long as it runs, so
+  # the first crash is the answer: no EGL driver, usually.
+  /category=Webview\.ChromeTerminated|Could not create default EGL display/ {
+    print "web process crashed: " $0 > "/dev/stderr"; failed = 1; exit
+  }
+  /category=EosClient\.Initialized/                    { eos = 1 }
   /disabled=true category=SelfUpdate\.DisabledRead/     { updater = 1 }
   /category=Startup\.Completed/                         { started = 1 }
   eos && updater && started                             { exit }

@@ -274,6 +274,13 @@ unpacking it rather than installing it.
   AppImage (`APPIMAGE`), but the launcher has its own AppImage handling,
   renaming and relaunching the file and pinning GIO modules to it, and that
   is not something to set off by pretending.
+- **It needs graphics drivers where Nix looks for them.** The store page is
+  WebKit, whose web process aborts with "Could not create default EGL
+  display" and is restarted forever if no EGL driver is found under
+  `/run/opengl-driver`. NixOS puts Mesa there with `hardware.graphics`, which
+  the module turns on; off NixOS, provide it the same way (for example with
+  [nix-system-graphics](https://github.com/soupglasses/nix-system-graphics)).
+  CI links this flake's Mesa there before the smoke test, for the same reason.
 - **x86\_64 only.** Epic publishes no other architecture.
 
 ## Development
