@@ -1,11 +1,11 @@
 {
-  "version": "0.117.0+g19cc56b",
+  "version": "0.118.0+g45ea4d4",
   "sources": {
     "x86_64-linux": {
       "debianArch": "amd64",
-      "url": "https://content-download-egs.distro.on.epicgames.com/Builds/EGLv2/0.117.0%2Bg19cc56b/Linux/EpicGamesLauncher-x86_64.deb",
-      "hash": "sha256-7dp4w1AdSXkYYF5SqwMDVn5JF/uIawj+dzSHHOiB6gg=",
-      "size": 92320008
+      "url": "https://content-download-egs.distro.on.epicgames.com/Builds/EGLv2/0.118.0%2Bg45ea4d4/Linux/EpicGamesLauncher-x86_64.deb",
+      "hash": "sha256-cZFUv2IYiuFEgTbAHv90tcPZU/l/jnEOUwbZHewnMUA=",
+      "size": 93428278
     }
   }
 }
